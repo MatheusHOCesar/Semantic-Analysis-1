@@ -1,20 +1,35 @@
 from __future__ import annotations
-
+import ast
 from collections.abc import Sequence
 
 from Lexer import Token, TokenKind
 from ast_nodes import (
+    Assignment,
+    BinaryExpr,
+    BinaryOperator,
     Block,
+    BoolLiteral,
+    CallExpr,
+    CallStmt,
     Expr,
     FunctionDecl,
+    IdentifierExpr,
+    IfStmt,
+    IntLiteral,
     Node,
     Parameter,
     PrintItem,
+    PrintStmt,
     Program,
+    ReturnStmt,
     SourceSpan,
     Stmt,
     StringLiteral,
     TypeName,
+    UnaryExpr,
+    UnaryOperator,
+    VarDecl,
+    WhileStmt,
 )
 
 
@@ -172,68 +187,212 @@ class Parser:
         return TYPE_BY_TOKEN[token.kind]
 
     def parse_parameter_list(self) -> list[Parameter]:
-        raise NotImplementedError("implemente parameter_list")
+        parameters = [self.parse_parameter()]
+        while self.match(TokenKind.COMMA):
+            parameters.append(self.parse_parameter())
+        return parameters
 
     def parse_parameter(self) -> Parameter:
-        raise NotImplementedError("implemente parameter")
+        start = self.peek()
+        param_type = self.parse_type()
+        name = self.expect(TokenKind.IDENTIFIER)
+        return Parameter(param_type, name.lexeme, span=self._span(start, name))
 
     def parse_block(self) -> Block:
-        raise NotImplementedError("implemente block")
+        start = self.expect(TokenKind.LEFT_BRACE)
+        statements = []
+        while not self.check(TokenKind.RIGHT_BRACE):
+            statements.append(self.parse_statement())
+        end = self.expect(TokenKind.RIGHT_BRACE)
+        return Block(statements, span=self._span(start, end))
 
     def parse_statement(self) -> Stmt:
-        raise NotImplementedError("implemente statement")
+        if self.check(TokenKind.KW_IF):
+            return self.parse_if_statement()
+        if self.check(TokenKind.KW_WHILE):
+            return self.parse_while_statement()
+        if self.check(TokenKind.KW_RETURN):
+            return self.parse_return_statement()
+        if self.check(TokenKind.KW_PRINT):
+            return self.parse_print_statement()
+        if self.check(TokenKind.LEFT_BRACE):
+            return self.parse_block()
+        if self.peek().kind in TYPE_START:
+            return self.parse_declaration()
+        if self.check(TokenKind.IDENTIFIER):
+            return self.parse_id_or_call_statement()
+        raise ParserError(self.peek(), STATEMENT_START)
 
     def parse_id_or_call_statement(self) -> Stmt:
-        raise NotImplementedError("implemente id_or_call_statement")
-
+        ident = self.expect(TokenKind.IDENTIFIER)
+        if self.match(TokenKind.ASSIGN):
+            target = IdentifierExpr(ident.lexeme, span=self._token_span(ident))
+            value = self.parse_expression()
+            semi = self.expect(TokenKind.SEMICOLON)
+            return Assignment(target, value, span=self._span(ident, semi))
+        elif self.match(TokenKind.LEFT_PAREN):
+            args = self.parse_arguments()
+            rp = self.expect(TokenKind.RIGHT_PAREN)
+            semi = self.expect(TokenKind.SEMICOLON)
+            call = CallExpr(ident.lexeme, args, span=self._span(ident, rp))
+            return CallStmt(call, span=self._span(ident, semi))
+        else:
+            raise ParserError(self.peek(), {TokenKind.ASSIGN, TokenKind.LEFT_PAREN})
+        
     def parse_declaration(self) -> Stmt:
-        raise NotImplementedError("implemente declaration")
+        start = self.peek()
+        var_type = self.parse_type()
+        name = self.expect(TokenKind.IDENTIFIER)
+        initializer = None
+        if self.match(TokenKind.ASSIGN):
+            initializer = self.parse_expression()
+        semi = self.expect(TokenKind.SEMICOLON)
+        return VarDecl(var_type, name.lexeme, initializer, span=self._span(start, semi))
 
     def parse_if_statement(self) -> Stmt:
-        raise NotImplementedError("implemente if_statement")
+        start = self.expect(TokenKind.KW_IF)
+        self.expect(TokenKind.LEFT_PAREN)
+        cond = self.parse_expression()
+        self.expect(TokenKind.RIGHT_PAREN)
+        then_b = self.parse_block()
+        else_b = None
+        end_node = then_b
+        if self.match(TokenKind.KW_ELSE):
+            else_b = self.parse_block()
+            end_node = else_b
+        return IfStmt(cond, then_b, else_b, span=self._span(start, end_node))
 
     def parse_while_statement(self) -> Stmt:
-        raise NotImplementedError("implemente while_statement")
+        start = self.expect(TokenKind.KW_WHILE)
+        self.expect(TokenKind.LEFT_PAREN)
+        cond = self.parse_expression()
+        self.expect(TokenKind.RIGHT_PAREN)
+        body = self.parse_block()
+        return WhileStmt(cond, body, span=self._span(start, body))
 
     def parse_return_statement(self) -> Stmt:
-        raise NotImplementedError("implemente return_statement")
+        start = self.expect(TokenKind.KW_RETURN)
+        value = None
+        if not self.check(TokenKind.SEMICOLON):
+            value = self.parse_expression()
+        semi = self.expect(TokenKind.SEMICOLON)
+        return ReturnStmt(value, span=self._span(start, semi))
 
     def parse_print_statement(self) -> Stmt:
-        raise NotImplementedError("implemente print_statement")
+        start = self.expect(TokenKind.KW_PRINT)
+        self.expect(TokenKind.LEFT_PAREN)
+        items = [self.parse_print_item()]
+        while self.match(TokenKind.COMMA):
+            items.append(self.parse_print_item())
+        self.expect(TokenKind.RIGHT_PAREN)
+        semi = self.expect(TokenKind.SEMICOLON)
+        return PrintStmt(items, span=self._span(start, semi))
 
     def parse_print_item(self) -> PrintItem:
-        raise NotImplementedError("implemente print_item")
+        if self.check(TokenKind.STRING_LITERAL):
+            return self.parse_string_literals()
+        return self.parse_expression()
 
     def parse_string_literals(self) -> StringLiteral:
-        raise NotImplementedError("implemente string_literals")
+        start = self.expect(TokenKind.STRING_LITERAL)
+        val = ast.literal_eval(start.lexeme)
+        end = start
+        while self.check(TokenKind.STRING_LITERAL):
+            tok = self.advance()
+            val += ast.literal_eval(tok.lexeme)
+            end = tok
+        return StringLiteral(val, span=self._span(start, end))
 
     def parse_expression(self) -> Expr:
-        raise NotImplementedError("implemente expression")
+        return self.parse_logical_or()
 
     def parse_logical_or(self) -> Expr:
-        raise NotImplementedError("implemente logical_or")
+        expr = self.parse_logical_and()
+        while tok := self.match(TokenKind.LOGICAL_OR):
+            right = self.parse_logical_and()
+            expr = BinaryExpr(BinaryOperator.LOGICAL_OR, expr, right, span=self._span(expr, right))
+        return expr
 
     def parse_logical_and(self) -> Expr:
-        raise NotImplementedError("implemente logical_and")
+        expr = self.parse_equality()
+        while tok := self.match(TokenKind.LOGICAL_AND):
+            right = self.parse_equality()
+            expr = BinaryExpr(BinaryOperator.LOGICAL_AND, expr, right, span=self._span(expr, right))
+        return expr
 
     def parse_equality(self) -> Expr:
-        raise NotImplementedError("implemente equality")
+        expr = self.parse_relational()
+        while tok := self.match(TokenKind.EQUAL_EQUAL, TokenKind.NOT_EQUAL):
+            op = BinaryOperator.EQUAL if tok.kind == TokenKind.EQUAL_EQUAL else BinaryOperator.NOT_EQUAL
+            right = self.parse_relational()
+            expr = BinaryExpr(op, expr, right, span=self._span(expr, right))
+        return expr
 
     def parse_relational(self) -> Expr:
-        raise NotImplementedError("implemente relational")
+        expr = self.parse_additive()
+        while tok := self.match(TokenKind.LESS, TokenKind.LESS_EQUAL, TokenKind.GREATER, TokenKind.GREATER_EQUAL):
+            if tok.kind == TokenKind.LESS: op = BinaryOperator.LESS
+            elif tok.kind == TokenKind.LESS_EQUAL: op = BinaryOperator.LESS_EQUAL
+            elif tok.kind == TokenKind.GREATER: op = BinaryOperator.GREATER
+            else: op = BinaryOperator.GREATER_EQUAL
+            right = self.parse_additive()
+            expr = BinaryExpr(op, expr, right, span=self._span(expr, right))
+        return expr
 
     def parse_additive(self) -> Expr:
-        raise NotImplementedError("implemente additive")
-
+        expr = self.parse_multiplicative()
+        while tok := self.match(TokenKind.PLUS, TokenKind.MINUS):
+            op = BinaryOperator.ADD if tok.kind == TokenKind.PLUS else BinaryOperator.SUBTRACT
+            right = self.parse_multiplicative()
+            expr = BinaryExpr(op, expr, right, span=self._span(expr, right))
+        return expr
+    
     def parse_multiplicative(self) -> Expr:
-        raise NotImplementedError("implemente multiplicative")
+        expr = self.parse_unary()
+        while tok := self.match(TokenKind.STAR, TokenKind.SLASH, TokenKind.PERCENT):
+            if tok.kind == TokenKind.STAR: op = BinaryOperator.MULTIPLY
+            elif tok.kind == TokenKind.SLASH: op = BinaryOperator.DIVIDE
+            else: op = BinaryOperator.REMAINDER
+            right = self.parse_unary()
+            expr = BinaryExpr(op, expr, right, span=self._span(expr, right))
+        return expr
 
     def parse_unary(self) -> Expr:
-        raise NotImplementedError("implemente unary")
+        if tok := self.match(TokenKind.LOGICAL_NOT, TokenKind.MINUS):
+            op = UnaryOperator.NOT if tok.kind == TokenKind.LOGICAL_NOT else UnaryOperator.NEGATE
+            operand = self.parse_unary()
+            return UnaryExpr(op, operand, span=self._span(tok, operand))
+        return self.parse_primary()
 
     def parse_primary(self) -> Expr:
-        raise NotImplementedError("implemente primary")
+        if tok := self.match(TokenKind.LEFT_PAREN):
+            expr = self.parse_expression()
+            rp = self.expect(TokenKind.RIGHT_PAREN)
+            expr.span = self._span(tok, rp)
+            return expr
+        
+        if tok := self.match(TokenKind.IDENTIFIER):
+            if self.match(TokenKind.LEFT_PAREN):
+                args = self.parse_arguments()
+                rp = self.expect(TokenKind.RIGHT_PAREN)
+                return CallExpr(tok.lexeme, args, span=self._span(tok, rp))
+            return IdentifierExpr(tok.lexeme, span=self._token_span(tok))
+
+        if tok := self.match(TokenKind.INT_LITERAL):
+            return IntLiteral(int(tok.lexeme), span=self._token_span(tok))
+        
+        if tok := self.match(TokenKind.KW_TRUE):
+            return BoolLiteral(True, span=self._token_span(tok))
+        
+        if tok := self.match(TokenKind.KW_FALSE):
+            return BoolLiteral(False, span=self._token_span(tok))
+        
+        raise ParserError(self.peek(), EXPRESSION_START)
 
     def parse_arguments(self) -> list[Expr]:
-        raise NotImplementedError("implemente arguments")
-
+        args = []
+        if self.peek().kind in EXPRESSION_START:
+            args.append(self.parse_expression())
+            while self.match(TokenKind.COMMA):
+                args.append(self.parse_expression())
+        return args
