@@ -1,7 +1,8 @@
 from ast_nodes import (
     Program, FunctionDecl, Parameter, Block, Stmt, Expr,
     VarDecl, IfStmt, WhileStmt, ReturnStmt, PrintStmt,
-    Assignment, CallStmt, TypeName
+    Assignment, CallStmt, TypeName,
+    IdentifierExpr, CallExpr, BinaryExpr, UnaryExpr
 )
 from symbols import Symbol, FunctionSymbol, SymbolKind, Scope
 from semantic_errors import SemanticDiagnostic, SemanticErrorKind, SemanticError
@@ -20,7 +21,6 @@ class NameResolver:
         node.metadata[key] = value
 
     def resolve(self, program: Program) -> Program:
-        # Coleta assinaturas globais
         for func in program.functions:
             if func.name in self.global_functions:
                 self.report(SemanticErrorKind.DUPLICATE_FUNCTION, f"função '{func.name}' já declarada", func.span)
@@ -31,19 +31,17 @@ class NameResolver:
             self.global_functions[func.name] = func_sym
             self._set_metadata(func, 'symbol', func_sym)
 
-        # Valida main
         main_sym = self.global_functions.get("main")
         if not main_sym or main_sym.type != TypeName.INT or len(main_sym.parameter_types) > 0:
             self.report(SemanticErrorKind.INVALID_MAIN, "ausência de main ou assinatura diferente", program.span)
 
-        # Inicia varredura dos corpos
         for func in program.functions:
             self.visit_function(func)
 
         if self.diagnostics:
             raise SemanticError(self.diagnostics)
         return program
-    
+
     def visit_function(self, func: FunctionDecl):
         scope = Scope(parent=None)
         self.current_scope = scope
@@ -103,4 +101,30 @@ class NameResolver:
                 if isinstance(item, Expr): self.visit_expression(item)
 
     def visit_expression(self, expr: Expr):
-        pass
+        if isinstance(expr, IdentifierExpr):
+            sym = self.lookup_variable(expr.name)
+            if not sym:
+                self.report(SemanticErrorKind.UNDECLARED_VARIABLE, f"variável '{expr.name}' sem declaração visível", expr.span)
+            else:
+                self._set_metadata(expr, 'symbol', sym)
+        elif isinstance(expr, CallExpr):
+            name = getattr(expr, 'name', None) or getattr(expr, 'ident', expr.__dict__.get('name'))
+            sym = self.global_functions.get(name)
+            if not sym:
+                self.report(SemanticErrorKind.UNDECLARED_FUNCTION, f"função inexistente '{name}'", expr.span)
+            else:
+                self._set_metadata(expr, 'symbol', sym)
+            for arg in expr.args:
+                self.visit_expression(arg)
+        elif isinstance(expr, BinaryExpr):
+            self.visit_expression(expr.left)
+            self.visit_expression(expr.right)
+        elif isinstance(expr, UnaryExpr):
+            self.visit_expression(expr.operand)
+
+    def lookup_variable(self, name: str) -> Symbol | None:
+        scope = self.current_scope
+        while scope is not None:
+            if name in scope.symbols: return scope.symbols[name]
+            scope = scope.parent
+        return None
