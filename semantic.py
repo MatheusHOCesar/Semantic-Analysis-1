@@ -1,14 +1,20 @@
-from __future__ import annotations
-
+# semantic.py
 from ast_nodes import Program
-from name_resolver import resolve_names
-from type_checker import check_types
-
+from name_resolver import NameResolver
+from type_checker import TypeChecker
 
 class SemanticAnalyzer:
-    """Coordena as duas passagens da Análise Semântica 1."""
-
     def analyze(self, program: Program) -> Program:
-        resolve_names(program)
-        check_types(program)
+        """
+        Executa as duas passagens da análise semântica.
+        """
+        # Passagem 1: Nomes e Escopos
+        resolver = NameResolver()
+        program = resolver.resolve(program)
+        
+        # Passagem 2: Verificacao de Tipos
+        # (Se a passagem 1 lancar SemanticError, a execucao nem chega aqui)
+        checker = TypeChecker()
+        program = checker.check(program)
+        
         return program
