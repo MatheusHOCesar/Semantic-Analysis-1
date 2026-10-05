@@ -74,20 +74,20 @@ class NameResolver:
             if stmt.name in self.current_scope.symbols:
                 self.report(SemanticErrorKind.DUPLICATE_DECLARATION, f"variável '{stmt.name}' já declarada", stmt.span)
             else:
-                sym = Symbol(stmt.name, SymbolKind.VARIABLE, getattr(stmt, 'type', stmt.var_type), stmt)
+                sym = Symbol(stmt.name, SymbolKind.VARIABLE, stmt.type, stmt)
                 self.current_scope.symbols[stmt.name] = sym
                 self._set_metadata(stmt, 'symbol', sym)
             
-            if getattr(stmt, 'initializer', None):
+            if stmt.initializer:
                 self.visit_expression(stmt.initializer)
         elif isinstance(stmt, Block):
             self.visit_block(stmt)
         elif isinstance(stmt, IfStmt):
-            self.visit_expression(stmt.cond)
-            self.visit_block(stmt.then_b)
-            if getattr(stmt, 'else_b', None): self.visit_block(stmt.else_b)
+            self.visit_expression(stmt.condition)
+            self.visit_block(stmt.then_block)
+            if stmt.else_block: self.visit_block(stmt.else_block)
         elif isinstance(stmt, WhileStmt):
-            self.visit_expression(stmt.cond)
+            self.visit_expression(stmt.condition)
             self.visit_block(stmt.body)
         elif isinstance(stmt, Assignment):
             self.visit_expression(stmt.target)
@@ -95,7 +95,7 @@ class NameResolver:
         elif isinstance(stmt, CallStmt):
             self.visit_expression(stmt.call)
         elif isinstance(stmt, ReturnStmt):
-            if getattr(stmt, 'value', None): self.visit_expression(stmt.value)
+            if stmt.value: self.visit_expression(stmt.value)
         elif isinstance(stmt, PrintStmt):
             for item in stmt.items:
                 if isinstance(item, Expr): self.visit_expression(item)
@@ -108,13 +108,12 @@ class NameResolver:
             else:
                 self._set_metadata(expr, 'symbol', sym)
         elif isinstance(expr, CallExpr):
-            name = getattr(expr, 'name', None) or getattr(expr, 'ident', expr.__dict__.get('name'))
-            sym = self.global_functions.get(name)
+            sym = self.global_functions.get(expr.name)
             if not sym:
-                self.report(SemanticErrorKind.UNDECLARED_FUNCTION, f"função inexistente '{name}'", expr.span)
+                self.report(SemanticErrorKind.UNDECLARED_FUNCTION, f"função inexistente '{expr.name}'", expr.span)
             else:
                 self._set_metadata(expr, 'symbol', sym)
-            for arg in expr.args:
+            for arg in expr.arguments:
                 self.visit_expression(arg)
         elif isinstance(expr, BinaryExpr):
             self.visit_expression(expr.left)
